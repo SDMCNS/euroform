@@ -1,2 +1,315 @@
-# euroform
-A Python Library and standalone API server to parse and convert FORMEX 4 xml (used by the EU for machine readable regulatory text) to user definable and easy to use JSON 
+# EuroForm
+
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-ready-green.svg)](https://fastapi.tiangolo.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**EuroForm** is a high-performance Python library, CLI, and FastAPI web service that converts **Formex 4 XML** (EU Publications Office / EUR-Lex legal documents) into clean, structured JSON and formatted plain text.
+
+---
+
+## Features
+
+- **Robust Formex 4 XML Parsing**:
+  - Extracts document metadata: languages, publication dates, document types, Official Journal (OJ) references, ELI, CELEX/case numbers, and EEA/ANSM relevance.
+  - Retains full legal content: titles, preambles (visas + recitals), enacting terms, articles, paragraphs, sub-points, lists, definition lists, tables (with column spans/row spans), quotes, annotations, figures, and signature blocks.
+  - Automatically nests point hierarchies (`(1)` > `(a)` > `(i)` > bullets).
+  - Handles mathematical formulas, exponents, subscripts, roots, fractions, and quotes.
+  - Extracts footnotes and notes into a clean dictionary map and strips boilerplate anonymization notices.
+  - Strips production and layout plumbing (`BIB.*`, `PAGE.*`, `NO.SEQ`, layout styles).
+- **FastAPI Web Service**:
+  - Modern web service with endpoints for single file uploads, batch file conversions, raw XML payloads, and JSON payloads.
+  - Interactive web UI at `/` with dark mode, drag-and-drop file upload, instant preview, and copy/download actions.
+  - Interactive OpenAPI documentation at `/docs` (Swagger) and `/redoc`.
+  - Full CORS support and structured error handling with XML line/column error reporting.
+- **Flexible CLI**:
+  - Convert files to stdout or write to destination files.
+  - Output JSON or readable plain text.
+  - Inspect output JSON Schema (`--schema`).
+  - Launch the web server directly (`--serve`).
+- **Backward Compatible**:
+  - Legacy `formex_to_json.py` shim provided so existing scripts and imports continue to function without changes.
+
+---
+
+## Installation
+
+Install in editable mode or as a package:
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/euroform.git
+cd euroform
+
+# Install package and dependencies
+pip install .
+
+# Or for development (with pytest and test tools)
+pip install -e ".[dev]"
+```
+
+Dependencies required:
+- `fastapi`
+- `uvicorn`
+- `pydantic`
+- `python-multipart`
+
+---
+
+## Python Library Usage
+
+### Basic Parsing to Dict
+
+```python
+from euroform import parse_formex
+
+# From file path, XML string, bytes, or file-like object
+doc = parse_formex("act.fmx.xml")
+
+print("Title:", doc.get("title"))
+print("Language:", doc.get("metadata", {}).get("language"))
+print("First Article:", doc["body"][0]["number"])
+```
+
+### Direct JSON String or Text Output
+
+```python
+from euroform import formex_to_json, formex_to_text
+
+# Directly serialize to formatted JSON string
+json_str = formex_to_json("act.fmx.xml", indent=2)
+
+# Directly render as formatted plain text
+plain_text = formex_to_text("act.fmx.xml")
+```
+
+### Parsing Options
+
+```python
+doc = parse_formex(
+    "act.fmx.xml",
+    keep_toc=False,         # Retain table of contents (default: False)
+    include_metadata=True,  # Extract metadata block (default: True)
+    nest_points=True,       # Nest sub-points under parent point (default: True)
+)
+```
+
+### Inspect JSON Schema
+
+```python
+from euroform import build_schema
+
+schema = build_schema()
+```
+
+---
+
+## FastAPI Web Service
+
+### Starting the Server
+
+You can launch the server using the CLI:
+
+```bash
+# Using run.py
+python run.py
+
+# Via euroform CLI
+euroform --serve --port 8000
+
+# Or via console script
+euroform-api
+
+# Or directly with uvicorn
+uvicorn euroform.api.app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Once running:
+- **Interactive Web Interface**: Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in your browser.
+- **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **ReDoc UI**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+- **JSON Schema**: [http://127.0.0.1:8000/schema](http://127.0.0.1:8000/schema)
+- **Health Check**: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+
+---
+
+## API Endpoints
+
+### 1. `POST /convert` (Universal Conversion Endpoint)
+
+Supports multipart file uploads, raw XML request bodies, or JSON payloads:
+
+#### Multipart File Upload (cURL)
+```bash
+curl -X POST http://127.0.0.1:8000/convert \
+  -F "file=@act.fmx.xml"
+```
+
+#### Raw XML Body (cURL)
+```bash
+curl -X POST http://127.0.0.1:8000/convert \
+  -H "Content-Type: application/xml" \
+  --data-binary @act.fmx.xml
+```
+
+#### Plain Text Response (cURL)
+```bash
+curl -X POST "http://127.0.0.1:8000/convert?output_format=text" \
+  -F "file=@act.fmx.xml"
+```
+
+### 2. `POST /convert/batch` (Batch Conversion)
+
+Upload multiple XML files simultaneously:
+
+```bash
+curl -X POST http://127.0.0.1:8000/convert/batch \
+  -F "files=@document1.xml" \
+  -F "files=@document2.xml"
+```
+
+Returns:
+```json
+{
+  "total": 2,
+  "successful": 2,
+  "failed": 0,
+  "results": [
+    {
+      "filename": "document1.xml",
+      "success": true,
+      "document": { ... }
+    },
+    {
+      "filename": "document2.xml",
+      "success": true,
+      "document": { ... }
+    }
+  ]
+}
+```
+
+### 3. Python Client Example
+
+Using `httpx` or `requests`:
+
+```python
+import httpx
+
+with open("act.fmx.xml", "rb") as f:
+    response = httpx.post(
+        "http://127.0.0.1:8000/convert",
+        files={"file": ("act.fmx.xml", f, "application/xml")},
+        params={"nest_points": True, "include_metadata": True}
+    )
+
+parsed_json = response.json()
+print("Root:", parsed_json["root"])
+print("Title:", parsed_json["title"])
+```
+
+---
+
+## Command-Line Interface (CLI)
+
+```bash
+# Convert Formex XML to JSON on stdout
+euroform act.fmx.xml
+
+# Convert Formex XML and save to file
+euroform act.fmx.xml -o act.json
+
+# Render as readable plain text
+euroform act.fmx.xml --text
+
+# Print JSON Schema (Draft 2020-12)
+euroform --schema > formex_schema.json
+
+# Launch the FastAPI web server
+euroform --serve --port 8000
+
+# Legacy standalone script compatibility
+python formex_to_json.py act.fmx.xml -o act.json
+```
+
+---
+
+## Output JSON Structure
+
+```json
+{
+  "format": "formex",
+  "root": "ACT",
+  "metadata": {
+    "language": "EN",
+    "document_type": "REG",
+    "date": "2024-02-15",
+    "official_journal": {
+      "collection": "L",
+      "number": "042",
+      "year": "2024",
+      "language": "EN"
+    },
+    "identifiers": [
+      { "type": "OJ", "number": "123/2024/EU" }
+    ],
+    "eea_relevance": true
+  },
+  "title": "Regulation (EU) 2024/123...",
+  "subtitle": "on standard...",
+  "preamble": {
+    "initial": "THE EUROPEAN PARLIAMENT...",
+    "visas": ["Having regard to..."],
+    "recitals": [
+      {
+        "type": "item",
+        "number": "(1)",
+        "text": "Whereas..."
+      }
+    ],
+    "final": "HAVE ADOPTED THIS REGULATION:"
+  },
+  "body": [
+    {
+      "type": "article",
+      "number": "Article 1",
+      "subtitle": "Subject matter",
+      "content": [
+        {
+          "type": "paragraph",
+          "number": "1.",
+          "text": "This Regulation lays down..."
+        }
+      ]
+    }
+  ],
+  "final": {
+    "content": [
+      {
+        "type": "signature",
+        "place_and_date": "Done at Brussels...",
+        "signatories": ["For the European Parliament..."]
+      }
+    ]
+  },
+  "notes": {
+    "E0001": "OJ L 55, 28.2.2011, p. 13."
+  }
+}
+```
+
+---
+
+## Running Tests
+
+Run the test suite using `pytest`:
+
+```bash
+pytest -v
+```
+
+---
+
+## License
+
+MIT License.

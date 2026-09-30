@@ -1,0 +1,3 @@
+[console_scripts]
+euroform = euroform.cli:main
+euroform-api = euroform.api.app:run_cli
